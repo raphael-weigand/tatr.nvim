@@ -78,16 +78,63 @@ function M.init()
     end)
 end
 
+-- TATR creates task metadata; edit the resulting TASK.md to supply its description.
 function M.new()
-    -- TATR owns creation and its interactive flags; open a real terminal for its CLI.
-    local project = root() or vim.fn.getcwd()
-    vim.cmd('botright 12split')
-    vim.fn.termopen({ 'tatr', 'new' }, { cwd = project, on_exit = function(_, code)
-        vim.schedule(function()
-            if code == 0 then vim.notify('TATR: task created. Run :Tatr to view.', vim.log.levels.INFO) end
+    local project = root()
+    if not project then
+        vim.notify('TATR: no tasks/ directory found (run :TatrInit)', vim.log.levels.WARN)
+        return
+    end
+
+    vim.ui.input({ prompt = 'TATR task title: ' }, function(title)
+        if not title or not title:match('%S') then return end
+
+        -- Capture existing task IDs so the newly created task is unambiguous.
+        local before = {}
+        for name, kind in vim.fs.dir(project .. '/tasks') do
+            if kind == 'directory' then before[name] = true end
+        end
+
+        vim.system({ 'tatr', 'new', title }, { cwd = project, text = true }, function(result)
+            vim.schedule(function()
+                if result.code ~= 0 then
+                    local err = (result.stderr ~= '' and result.stderr or result.stdout) or 'unknown error'
+                    vim.notify('TATR: ' .. err, vim.log.levels.ERROR)
+                    return
+                end
+
+                local created = {}
+                for name, kind in vim.fs.dir(project .. '/tasks') do
+                    if kind == 'directory' and not before[name] then
+                        local path = project .. '/tasks/' .. name .. '/TASK.md'
+                        if vim.fn.filereadable(path) == 1 then
+                            table.insert(created, path)
+                        end
+                    end
+                end
+
+                if #created ~= 1 then
+                    vim.notify('TATR: task created, but could not identify TASK.md; use :Tatr to open it',
+                        vim.log.levels.WARN)
+                    return
+                end
+
+                local path = created[1]
+                vim.cmd.edit(vim.fn.fnameescape(path))
+                -- Select TATR's default body so typing immediately replaces it.
+                local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+                for i, line in ipairs(lines) do
+                    if line == 'No description.' then
+                        vim.api.nvim_win_set_cursor(0, { i, 0 })
+                        vim.cmd('normal! "_dd')
+                        vim.cmd('startinsert')
+                        return
+                    end
+                end
+                vim.notify('TATR: task created; edit its description in TASK.md', vim.log.levels.INFO)
+            end)
         end)
-    end })
-    vim.cmd('startinsert')
+    end)
 end
 
 function M.setup(opts)
