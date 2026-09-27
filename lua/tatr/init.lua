@@ -162,6 +162,13 @@ return M
     if opts.keymap then
         vim.keymap.set('n', opts.keymap, M.list, { desc = 'TATR: list tasks' })
     end
+    if opts.comment_keymap then
+        vim.keymap.set('n', opts.comment_keymap, M.from_comment, { desc = 'TATR: task from TODO comment' })
+        vim.keymap.set('x', opts.comment_keymap, function()
+            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'nx', false)
+            M.from_comment({ visual = true })
+        end, { desc = 'TATR: task from selected comments' })
+    end
 end
 
 return M
@@ -288,7 +295,7 @@ function M.from_comment(opts)
     end
     -- An extmark follows the source location while the external command runs.
     local ns = vim.api.nvim_create_namespace('tatr_comment')
-    local mark = vim.api.nvim_buf_set_extmark(buf, ns, first - 1, 0, { end_row = last })
+    local mark = vim.api.nvim_buf_set_extmark(buf, ns, first - 1, 0, {})
     local source_tick = vim.api.nvim_buf_get_changedtick(buf)
 
     vim.system({ 'tatr', 'new', title }, { cwd = project, text = true }, function(result)
@@ -336,15 +343,16 @@ function M.from_comment(opts)
             -- Never overwrite source code that changed while TATR was running.
             if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_changedtick(buf) == source_tick then
                 local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, { details = true })
-                if #pos > 0 and pos[3] and pos[3].end_row == last then
+                if #pos > 0 and pos[1] == first - 1 then
                     local same = vim.deep_equal(vim.api.nvim_buf_get_lines(buf, first - 1, last, false), source)
                     if same then
                         local indent = source[1]:match('^%s*') or ''
                         local marker = prefix
-                        if marker:match('^/%*') then marker = '// ' end
+                        if marker:match('^/%*') then marker = '/* ' end
                         if marker:match('^<!') then marker = '<!-- ' end
                         local replacement = indent .. marker .. 'TASK(' .. task.id .. '): ' .. title
                         if marker:match('^<!') then replacement = replacement .. ' -->' end
+                        if marker:match('^/%*') then replacement = replacement .. ' */' end
                         vim.api.nvim_buf_set_lines(buf, first - 1, last, false, { replacement })
                     end
                 end
